@@ -32,12 +32,33 @@
 
 #### 创建时机
 
-由`AspectJAwareAdvisorAutoProxyCreator`的父类`AbstactAutoProxyCreator`所实现`BeanPostProcessor`接口的postProcessAfterInitialization方法，判断是否需要创建AOP代理对象
+由`AbstactAutoProxyCreator`所实现`BeanPostProcessor`接口的postProcessAfterInitialization方法，判断是否需要创建AOP代理对象
 
-1. 先查找所有advisor，匹配是否有可应用到当前bean的advisor
-2. 创建并初始化ProxyFactory实例
-3. 如果proxyTargetClass=false，再通过evaluateProxyInterfaces检查当前bean是否有实现接口，如果没有实现接口，设置proxyTargetClass=true（使用Cglib代理）；否则使用JdkProxy
-4. ProxyFactory的父类ProxyCreatorSupport持有的DefaultAopProxyFactory，进行代理对象创建（调用createAopProxy方法）
+1. wrapIfNecessary判断是否需要创建代理
+    - 可通过给bean实现接口`AopInfrastructureBean`使其跳过代理创建
+2. 先查找所有advisor，匹配是否有可应用到当前bean的advisor
+3. 使用PartialOrder对所有advisors进行排序，见**[Advice执行顺序](#Advice执行顺序)**章节
+4. 下面开始进如代理创建
+5. 创建并初始化ProxyFactory实例
+6. `buildAdvisors()`检查interceptors里面是否有非Advisor类型拦截器，有则使用`advisorAdapterRegistry`进行包装
+7. `ProxyProcessorSupport`负责判断代理模式
+   - 如果proxyTargetClass=false，再通过evaluateProxyInterfaces检查当前bean是否有实现接口，如果没有实现接口，设置proxyTargetClass=true（使用Cglib代理）；否则使用JdkProxy
+   - 实现的接口不能是容器回调类型的接口，例如：Aware.class、InitializingBean.class、DisposableBean.class、Closeable.class、AutoCloseable.class
+   - `ObjenesisCglibAopProxy`是负责创建cglib代理对象的类，其拥有一个独特特性：可不调用目标类的构造器，完成对象创建，针对构造方法私有、仅含带参数构造器等场景
+8. ProxyFactory的父类ProxyCreatorSupport持有的DefaultAopProxyFactory，进行代理对象创建（调用createAopProxy方法）
+
+所有的代理对象，不论是通过jdk代理还是cglib生成的，均实现Spring的接口`Adviced`接口和`SpringProxy`接口
+
+### 调用AOP对象方法
+
+1. 进入拦截方法
+   - JdkProxy对象进入JdkDynamicAopProxy#invoke
+   - cglib对象进入拦截器的intercept方法。在创建阶段，应用CallbackFilter对目标类声明及其继承类的方法分配不同的类型拦截器，Aop拦截器为`CglibAopProxy$DynamicAdvisedInterceptor`。
+2. 方法拦截器(MethodInterceptor或InvocationHandler)，通过持有代理对象引用（其类型为AdvisedSupport），调用`getInterceptorsAndDynamicInterceptionAdvice`方法获取代理对象的InterceptorChain。该Chain由`DefaultAdvisorChainFactory`生成。
+   1. 在生成InterceptorChain过程中，涉及到advisor转换为methodInterceptor的操作，该步骤由接口`AdvisorAdapter`的多个实现类完成，每个适配器均表明自己支持的advice，并提供转换为MethodInterceptor的具体实现步骤
+   2. 接口`AdvisorAdapter`的多个实现类，均注册在`GlobalAdvisorAdapterRegistry`中
+   3. 如果要添加自定义的适配器，可用@Bean将实现AdvisorAdapter的bean注册到容器中，在spring里增加`AdvisorAdapterRegistrationManager`后置处理器，在bean初始化完毕后注册到`GlobalAdvisorAdapterRegistry`中
+3. 递归调用chain的拦截器
 
 ### Advice执行顺序
 

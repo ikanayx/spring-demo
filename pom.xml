@@ -13,6 +13,7 @@
         <module>simple-proxy</module>
         <module>spring-aop</module>
         <module>spring-autowired</module>
+        <module>spring-i18n</module>
         <module>spring-mvc</module>
     </modules>
 
